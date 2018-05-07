@@ -1,4 +1,4 @@
-let file = cat('data.csv');  // read the file
+let file = cat(fileName);  // read the file
 let originDeviceIDs = file.split('\n'); // create an array of words
 
 const debug = false;
@@ -24,18 +24,17 @@ let dbs = [
 ];
 
 var events = [
-  "devices:Snapshot",
-  "devices:Ready",
-  "devices:Register",
-  "devices:Locate",
-  "devices:Allocate",
+  // "devices:Snapshot",
+  // "devices:Ready",
+  // "devices:Register",
+  // "devices:Locate",
+  // "devices:Allocate",
   "devices:Receive",
   "devices:FinalUser",
-  "devices:Alive",
-  "devices-Recycle",
+  "devices:Live",
   "devices:Dispose",
-  "devices:Shell",
-  "devices:Migrate",
+  "devices-Recycle",
+  "devices:Sell"
 ];
 
 var FIRSTDAYOFMONTH = 1;
@@ -143,6 +142,10 @@ tss.forEach(function(ts) {
 	    }
 	  ]
     	};
+	if(events[j] === 'devices:FinalUser') {
+	  query["@type"] = 'devices:Receive';
+	  query.type = 'FinalUser';
+	}
     	let eventsFound = db.getCollection('events').find(query).toArray();
     	deviceEvents = deviceEvents.concat(eventsFound);
       }

@@ -23,30 +23,51 @@ let dbs = [
   'dh_trinijove'
 ];
 
-var events = [
-  // "devices:Snapshot",
-  // "devices:Ready",
-  // "devices:Register",
-  // "devices:Locate",
-  // "devices:Allocate",
+
+
+let monthlyEvents = [
+  "devices:EraseFailure", 
+  "devices:EraseSuccess", 
+  "devices:Register", 
+  "devices:Ready",
   "devices:Receive",
   "devices:FinalUser",
-  "devices:Live",
+  "devices:Sell",
   "devices:Dispose",
-  "devices-Recycle",
-  "devices:Sell"
+  "devices:Recycle"
 ];
 
-var FIRSTDAYOFMONTH = 1;
-var START_DATE = new Date(2017, 0, 1);
-var END_DATE = new Date(2018, 2, 1);
-var MONTH_NAMES = ["January", "February", "March", "April", "May", "June",
+debug && print(monthlyEvents.length+' status events');
+
+let aggregatedEvents = [
+  "devices:Registered", 
+  "devices:NotRegistered"
+];
+
+debug && print(aggregatedEvents.length+' status events');
+
+/* for each event, sum if last event for timespan from beginning */
+let statusEvents = [
+  "devices:InPreparation", // in preparation / going to be ready: one of snapshot, register or dispose
+  "devices:Ready",
+  "devices:InReuse", // finaluser or sell
+  "devices:Recycle"
+];
+
+debug && print(statusEvents.length+' status events');
+
+
+
+let FIRSTDAYOFMONTH = 1;
+let START_DATE = new Date(2017, 0, 1);
+let END_DATE = new Date(2018, 2, 1);
+let MONTH_NAMES = ["January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December"
 ];
 
-var ts = START_DATE;
-var next_ts;
-var tss = [];
+let ts = START_DATE;
+let next_ts;
+let tss = [];
 (function setTimeSpans() {
   while(ts.getTime() <= END_DATE.getTime()) {
     if (ts.getMonth() == 11) {
@@ -58,6 +79,9 @@ var tss = [];
       quarter: parseInt(ts.getMonth() / 3 ) + 1,
       month: ts.getMonth(),
       year: ts.getFullYear(),
+      eventCreatedAggregated : {
+	$gt: START_DATE, $lte: next_ts
+      },
       eventCreated : {
 	$gt: ts, $lte: next_ts
       }
@@ -67,19 +91,22 @@ var tss = [];
 })();
 
 
-var labels = [];
-(function setLabels() {
+function getLabels() {
   //labels.push("Non-components created (month)");
-  labels = labels.concat(events.map((e) => { return e.substring("devices:".length, e.length);})).join(',');
-})();
+  let labels = [];
+  labels = labels.concat(monthlyEvents.map((e) => { return 'Monthly:'+e.substring("devices:".length, e.length);}));
+  labels = labels.concat(statusEvents.map((e) => { return 'Status:'+e.substring("devices:".length, e.length);}));
+  labels = labels.join(',');
+  return labels;
+}
 
 
 let originDeviceIDsNotFound = originDeviceIDs.slice();
 let deviceIds = [];
 
 function unique(array) {
-  var arr = [];
-  for(var i = 0; i < array.length; i++) {
+  let arr = [];
+  for(let i = 0; i < array.length; i++) {
     if(!arr.includes(array[i])) {
       arr.push(array[i]);
     }
@@ -88,7 +115,7 @@ function unique(array) {
 }
 originDeviceIDs.forEach(function(originID) {
   let foundDeviceIds = [];
-  for(var i=0; i<dbs.length; i++) {
+  for(let i=0; i<dbs.length; i++) {
     db = db.getSiblingDB(dbs[i]);
     let foundDevices = db.getCollection('devices').find({$or: 
 				      [ 
@@ -115,23 +142,89 @@ originDeviceIDs.forEach(function(originID) {
 
 print('Found', deviceIds.length, 'of', originDeviceIDs.length, 'devices in', dbs.length,'databases');
 
-print("quarter,month,year,",labels);
+print("quarter,month,year,",getLabels());
 tss.forEach(function(ts) {
-  let eventCounts = {};
-  events.forEach(function(e) {
-    eventCounts[e] = 0;
+  let lastEventCountsAggregated = {};
+  statusEvents.forEach(function(e) {
+    lastEventCountsAggregated[e] = 0;
   });
+  let monthlyEventCounts = {};
+  monthlyEvents.forEach(function(e) {
+    monthlyEventCounts[e] = 0;
+  });
+
 
   //for each device increment count of last event
   deviceIds.forEach(function(id) {
-
+    
     //get all events in all databases for device
-    let deviceEvents = [];
+    let aggregatedDeviceEvents = [];
     for(let i=0; i<dbs.length; i++) {
       db = db.getSiblingDB(dbs[i]);
-      for(let j=0; j<events.length; j++) {
-    	var query = {
-    	  "@type": events[j],
+
+      // aggregated events
+      for(let j=0; j<statusEvents.length; j++) {
+	let statusEvent = statusEvents[j];
+    	let query = {
+    	  _created: ts.eventCreatedAggregated
+    	};
+	let orDeviceID = [
+	    {
+	      "device": id
+	    },
+	    {
+	      "devices": id
+	    }
+	];
+	if(statusEvent === 'devices:InReuse') {
+	  query['$and'] = [
+	    { 
+	      $or : [
+		{
+		  "@type": 'devices:Receive',
+		  type: 'FinalUser'
+		},
+		{
+		  "@type": 'devices:Sell'
+		}
+	      ]
+	    },
+	    { 
+	      $or : orDeviceID
+	    }
+	  ];
+	} else {
+	  query['@type'] = statusEvent;
+	  query['$or'] = orDeviceID;
+	}
+	
+	if(statusEvent === 'devices:InPreparation') {
+	  query['@type'] = {
+	    $in: [ 'devices:Register', 'devices:ToPrepare', 'devices:Repair', 'devices:ToRepair' ]
+	  };
+	}
+
+    	let eventsFound = db.getCollection('events').find(query).toArray();
+
+	// in case of multiple @types in query, we map all posible types to one
+	eventsFound.forEach((event) => {
+	  event['@type'] = statusEvent;
+	});
+	  
+	if(eventsFound.length > 0) {
+	  debug && print(
+	    "Q"+ts.quarter+","+(ts.month+1)+","+ts.year+","
+	      +"found "+eventsFound.length+"events of type"+statusEvent+" for device "+id);
+	}
+    	aggregatedDeviceEvents = aggregatedDeviceEvents.concat(eventsFound);
+      }
+
+
+      // monthly events
+      for(let j=0; j<monthlyEvents.length; j++) {
+	let monthlyEvent = monthlyEvents[j];
+    	let query = {
+    	  "@type": monthlyEvent,
     	  _created: ts.eventCreated,
 	  $or: [
 	    {
@@ -142,33 +235,95 @@ tss.forEach(function(ts) {
 	    }
 	  ]
     	};
-	if(events[j] === 'devices:FinalUser') {
+	if(monthlyEvent === 'devices:FinalUser') {
 	  query["@type"] = 'devices:Receive';
 	  query.type = 'FinalUser';
+	} else if(monthlyEvent === 'devices:EraseFailure') {
+	  query["@type"] = { 
+	    $in : [ 
+	      'devices:EraseBasic', 
+	      'devices:EraseSectors'] 
+	  };
+	  query.success = false;
+	} else if(monthlyEvent === 'devices:EraseSuccess') {
+	  query["@type"] = { 
+	    $in : [ 
+	      'devices:EraseBasic', 
+	      'devices:EraseSectors'] 
+	  };
+	  query.success = true;
 	}
-    	let eventsFound = db.getCollection('events').find(query).toArray();
-    	deviceEvents = deviceEvents.concat(eventsFound);
+	
+	let numMonthlyEvents = 0;
+	if(monthlyEvent === 'devices:Register') {
+	  query["@type"] = 'devices:Snapshot';
+	  numMonthlyEvents = db.events.distinct('device', query).length;
+	} else {
+    	  numMonthlyEvents = db.getCollection('events').count(query);
+	}
+    	monthlyEventCounts[monthlyEvent] += numMonthlyEvents;
       }
+
+      // aggregatedEvents TODO
+      // for(let j=0; j<aggregatedEvents.length; j++) {
+      // 	let aggregatedEvent = aggregatedEvents[j];
+      // 	let query = {
+      // 	  "@type": aggregatedEvent,
+      // 	  _created: ts.eventCreated,
+      // 	  $or: [
+      // 	    {
+      // 	      "device": id
+      // 	    },
+      // 	    {
+      // 	      "devices": id
+      // 	    }
+      // 	  ]
+      // 	};
+	
+      // 	let numAggregatedEvents = 0;
+      // 	if(aggregatedEvent === 'devices:Registered') {
+      // 	  query["@type"] = 'devices:Snapshot';
+      // 	  numAggregatedEvents = db.events.distinct('device', query).length;
+      // 	  monthlyEventCounts['devices:Registered'] += numAggregatedEvents;
+      // 	  monthlyEventCounts['devices:NotRegistered'] += numAggregatedEvents;
+      // 	} else if(aggregatedEvent === 'devices:NotRegistered') {
+      // 	  // already in registered
+      // 	} else {
+      // 	  monthlyEventCounts[aggregatedEvent] += numAggregatedEvents;
+      // 	}
+      	
+      // }
     }
 
-    //increment count of last event
-    if(deviceEvents.length > 0) {
-      deviceEvents = deviceEvents.sort(function(a,b){
+    //increment count of last aggregated event
+    if(aggregatedDeviceEvents.length > 0) {
+      aggregatedDeviceEvents = aggregatedDeviceEvents.sort(function(a,b){
       	return new Date(b._created) - new Date(a._created);
       });
-      let lastEvent = deviceEvents[0]["@type"];
-      eventCounts[lastEvent] += 1; //count last event only
+      let lastEvent = aggregatedDeviceEvents[0]["@type"];
+      debug && print('count last event of type '+lastEvent);
+      lastEventCountsAggregated[lastEvent] += 1; //count last event only
     }
   });
 
-  //print
-  let eventCountsList = [];
-  Object.keys(eventCounts).forEach(function(event) {
-    let eventCount = eventCounts[event] || '';
-    eventCountsList.push(eventCount);
+  
+  // convert hash maps to printable lists
+  let monthlyEventCountsList = [];
+  Object.keys(monthlyEventCounts).forEach(function(event) {
+    let eventCount = monthlyEventCounts[event] || '';
+    monthlyEventCountsList.push(eventCount);
   });
+  let lastEventCountsAggregatedList = [];
+  Object.keys(lastEventCountsAggregated).forEach(function(event) {
+    let eventCountAggregated = lastEventCountsAggregated[event] || '';
+    lastEventCountsAggregatedList.push(eventCountAggregated);
+  });
+
+  // print
   print(("Q"+ts.quarter)+","+(ts.month+1)+","+ts.year+","
-	+eventCountsList.join());
+	+monthlyEventCountsList.join()
+	+","
+	+lastEventCountsAggregatedList.join());
 });
 
 print();
