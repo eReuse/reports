@@ -95,8 +95,10 @@ function getLabels() {
   //labels.push("Non-components created (month)");
   let labels = [];
   labels = labels.concat(monthlyEvents.map((e) => { return 'Monthly:'+e.substring("devices:".length, e.length);}));
+  labels.push('Registered (accumulated)');
+  labels.push('Not registered (accumulated)');
   labels = labels.concat(statusEvents.map((e) => { return 'Status:'+e.substring("devices:".length, e.length);}));
-  labels = labels.join(',');
+  // labels.push('Status:Sum');
   return labels;
 }
 
@@ -142,7 +144,8 @@ originDeviceIDs.forEach(function(originID) {
 
 print('Found', deviceIds.length, 'of', originDeviceIDs.length, 'devices in', dbs.length,'databases');
 
-print("quarter,month,year,",getLabels());
+print(",,,", "Per month", monthlyEvents.map((l) => { return ','; }), "Registered (accumulated),,", "Status at end of month");
+print("quarter,month,year,",getLabels().join());
 tss.forEach(function(ts) {
   let lastEventCountsAggregated = {};
   statusEvents.forEach(function(e) {
@@ -314,16 +317,25 @@ tss.forEach(function(ts) {
     monthlyEventCountsList.push(eventCount);
   });
   let lastEventCountsAggregatedList = [];
+  let lastEventCountsSum = 0;
   Object.keys(lastEventCountsAggregated).forEach(function(event) {
     let eventCountAggregated = lastEventCountsAggregated[event] || '';
     lastEventCountsAggregatedList.push(eventCountAggregated);
+    lastEventCountsSum += eventCountAggregated;
   });
 
   // print
   print(("Q"+ts.quarter)+","+(ts.month+1)+","+ts.year+","
 	+monthlyEventCountsList.join()
 	+","
-	+lastEventCountsAggregatedList.join());
+	+lastEventCountsSum // Registered
+	+","
+	+(originDeviceIDs.length - lastEventCountsSum) // Not registered
+	+","
+	+lastEventCountsAggregatedList.join()
+	// +","
+	// +lastEventCountsSum // Control, necessary?
+       );
 });
 
 print();
