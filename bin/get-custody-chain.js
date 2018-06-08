@@ -125,20 +125,11 @@ originDeviceIDs.forEach(function(originID) {
   }
 
   foundDeviceIds = unique(foundDeviceIds);
-  if(foundDeviceIds.length > 1) {
-    debug && print('WARN Found more than one device for origin id', originID, JSON.stringify(foundDeviceIds).replace(',','_'));
-    originDeviceIDsNotFound.splice(originDeviceIDsNotFound.indexOf(originID),1);
-    duplicateIDs.push({
-      originDeviceID: originID,
-      devicehubIDs: foundDeviceIds
-    });
-  } else if(foundDeviceIds.length == 0) {
+  if(foundDeviceIds.length == 0) {
     debug && print('WARN Could not find any device for origin id', originID, foundDeviceIds.length);
   } else {
     originDeviceIDsNotFound.splice(originDeviceIDsNotFound.indexOf(originID),1);
-    deviceIds.push({
-      ids: foundDeviceIds
-    });
+    deviceIds.push(foundDeviceIds);
   }
 });
 
@@ -158,16 +149,16 @@ tss.forEach(function(ts) {
 
 
   //for each device increment count of last event
-  deviceIds.forEach(function(device) {
+  deviceIds.forEach(function(ids) {
     let orDeviceID = [
       {
 	"device": {
-	  $in: device.idsFound
+	  $in: ids
 	}
       },
       {
 	"devices": {
-	  $in: device.idsFound
+	  $in: ids
 	}
       }
     ];
@@ -322,11 +313,6 @@ tss.forEach(function(ts) {
     lastEventCountsAggregatedList.push(eventCountAggregated);
     if(eventCountAggregated) {
       lastEventCountsSum += parseInt(eventCountAggregated);
-    }
-    if(lastEventCountsSum > 150) {
-      print('lastEventCountsSum: '+lastEventCountsSum);
-      print('lastEventCountsAggregated: ', JSON.stringify(lastEventCountsAggregated));
-      quit();
     }
   });
 
