@@ -34,7 +34,7 @@ var events = [
 var COLLECTION="events";
 var FIRSTDAYOFMONTH = 1;
 var START_DATE = new Date(2017, 9, 1);
-var END_DATE = new Date(2018, 2, 1);
+var END_DATE = new Date();
 var MONTH_NAMES = ["January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December"
 ];
