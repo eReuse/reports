@@ -33,30 +33,22 @@ let monthlyEvents = [
   "devices:Receive",
   "devices:FinalUser",
   "devices:Sell",
-  "devices:Dispose",
-  "devices:Recycle"
+  "devices:ToDispose",
+  "devices:Dispose"
 ];
-
-debug && print(monthlyEvents.length+' status events');
 
 let aggregatedEvents = [
   "devices:Registered", 
   "devices:NotRegistered"
 ];
 
-debug && print(aggregatedEvents.length+' status events');
-
 /* for each event, sum if last event for timespan from beginning */
 let statusEvents = [
   "devices:InPreparation", // in preparation / going to be ready: one of snapshot, register or dispose
   "devices:Ready",
   "devices:InReuse", // finaluser or sell
-  "devices:Recycle"
+  "devices:Dispose"
 ];
-
-debug && print(statusEvents.length+' status events');
-
-
 
 let FIRSTDAYOFMONTH = 1;
 let START_DATE = new Date(2017, 0, 1);
@@ -105,6 +97,7 @@ function getLabels() {
 
 let originDeviceIDsNotFound = originDeviceIDs.slice();
 let deviceIds = [];
+let duplicateIDs = [];
 
 function unique(array) {
   let arr = [];
@@ -133,12 +126,19 @@ originDeviceIDs.forEach(function(originID) {
 
   foundDeviceIds = unique(foundDeviceIds);
   if(foundDeviceIds.length > 1) {
-    debug && print('ERROR Found more than one device for origin id', originID, foundDeviceIds.length);
+    debug && print('WARN Found more than one device for origin id', originID, JSON.stringify(foundDeviceIds).replace(',','_'));
+    originDeviceIDsNotFound.splice(originDeviceIDsNotFound.indexOf(originID),1);
+    duplicateIDs.push({
+      originDeviceID: originID,
+      devicehubIDs: foundDeviceIds
+    });
   } else if(foundDeviceIds.length == 0) {
     debug && print('WARN Could not find any device for origin id', originID, foundDeviceIds.length);
   } else {
     originDeviceIDsNotFound.splice(originDeviceIDsNotFound.indexOf(originID),1);
-    deviceIds.push(foundDeviceIds[0]);
+    deviceIds.push({
+      ids: foundDeviceIds
+    });
   }
 });
 
@@ -158,8 +158,20 @@ tss.forEach(function(ts) {
 
 
   //for each device increment count of last event
-  deviceIds.forEach(function(id) {
-    
+  deviceIds.forEach(function(device) {
+    let orDeviceID = [
+      {
+	"device": {
+	  $in: device.idsFound
+	}
+      },
+      {
+	"devices": {
+	  $in: device.idsFound
+	}
+      }
+    ];
+
     //get all events in all databases for device
     let aggregatedDeviceEvents = [];
     for(let i=0; i<dbs.length; i++) {
@@ -171,14 +183,7 @@ tss.forEach(function(ts) {
     	let query = {
     	  _created: ts.eventCreatedAggregated
     	};
-	let orDeviceID = [
-	    {
-	      "device": id
-	    },
-	    {
-	      "devices": id
-	    }
-	];
+	
 	if(statusEvent === 'devices:InReuse') {
 	  query['$and'] = [
 	    { 
@@ -203,7 +208,7 @@ tss.forEach(function(ts) {
 	
 	if(statusEvent === 'devices:InPreparation') {
 	  query['@type'] = {
-	    $in: [ 'devices:Register', 'devices:ToPrepare', 'devices:Repair', 'devices:ToRepair' ]
+	    $in: [ 'devices:Register', 'devices:ToPrepare', 'devices:Repair', 'devices:ToRepair', 'devices:ToDispose' ]
 	  };
 	}
 
@@ -215,9 +220,9 @@ tss.forEach(function(ts) {
 	});
 	  
 	if(eventsFound.length > 0) {
-	  debug && print(
+	  /* debug && print(
 	    "Q"+ts.quarter+","+(ts.month+1)+","+ts.year+","
-	      +"found "+eventsFound.length+"events of type"+statusEvent+" for device "+id);
+	      +"found "+eventsFound.length+"events of type"+statusEvent+" for device "+id); */
 	}
     	aggregatedDeviceEvents = aggregatedDeviceEvents.concat(eventsFound);
       }
@@ -229,14 +234,7 @@ tss.forEach(function(ts) {
     	let query = {
     	  "@type": monthlyEvent,
     	  _created: ts.eventCreated,
-	  $or: [
-	    {
-	      "device": id
-	    },
-	    {
-	      "devices": id
-	    }
-	  ]
+	  $or: orDeviceID
     	};
 	if(monthlyEvent === 'devices:FinalUser') {
 	  query["@type"] = 'devices:Receive';
@@ -304,7 +302,7 @@ tss.forEach(function(ts) {
       	return new Date(b._created) - new Date(a._created);
       });
       let lastEvent = aggregatedDeviceEvents[0]["@type"];
-      debug && print('count last event of type '+lastEvent);
+      /* debug && print('count last event of type '+lastEvent); */
       lastEventCountsAggregated[lastEvent] += 1; //count last event only
     }
   });
@@ -320,8 +318,16 @@ tss.forEach(function(ts) {
   let lastEventCountsSum = 0;
   Object.keys(lastEventCountsAggregated).forEach(function(event) {
     let eventCountAggregated = lastEventCountsAggregated[event] || '';
+    debug && print('lastEventCountsAggregated for event '+event+':'+eventCountAggregated);
     lastEventCountsAggregatedList.push(eventCountAggregated);
-    lastEventCountsSum += eventCountAggregated;
+    if(eventCountAggregated) {
+      lastEventCountsSum += parseInt(eventCountAggregated);
+    }
+    if(lastEventCountsSum > 150) {
+      print('lastEventCountsSum: '+lastEventCountsSum);
+      print('lastEventCountsAggregated: ', JSON.stringify(lastEventCountsAggregated));
+      quit();
+    }
   });
 
   // print
@@ -338,8 +344,18 @@ tss.forEach(function(ts) {
        );
 });
 
+if(duplicateIDs.length > 0) {
+  print();
+  print(duplicateIDs.length,'devices with multiple ids:');
+  print("Origin ID, IDs found in devicehub");
+  duplicateIDs.forEach(function(d) {
+    print(d.originDeviceID + ',' + d.devicehubIDs.join(' - '));
+  });
+}
+
 print();
-print(originDeviceIDsNotFound.length,'not found:');
+print(originDeviceIDsNotFound.length,'devices not found:');
+print("Origin ID");
 originDeviceIDsNotFound.forEach(function(d) {
   print(d);
 });
