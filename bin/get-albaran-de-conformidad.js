@@ -160,6 +160,8 @@ originDeviceIDs.forEach(function(originID) {
 	eventFields.map((f) => f.key).forEach((key) => {
 	  if(key === '@type' && event[key]) {
 	    out += event[key].substr('devices:'.length);
+	  } else if(key === '_created' && event[key]) {
+	    out += (new Date(event[key])).toDateString();
 	  } else {
 	    out += event[key] || '';
 	  }
