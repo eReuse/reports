@@ -1,5 +1,5 @@
-let file = cat(fileName);  // read the file
-let originDeviceIDs = file.split('\n'); // create an array of words
+load('bin/getOriginDeviceIDs.js')
+const originDeviceIDs = getOriginDeviceIDs(fileName)
 
 const debug = false;
 
