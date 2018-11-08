@@ -27,8 +27,8 @@ var events = [
   "devices:Alive",
   "devices-Recycle",
   "devices:Dispose",
-  "devices:Shell",
-  "devices:Migrate",
+  "devices:Sell",
+  "devices:Migrate"
 ];
 
 var COLLECTION="events";
